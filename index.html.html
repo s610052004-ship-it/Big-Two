@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="摸三下大老二" />
+  <title>摸三下大老二</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React 18 & ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <!-- Babel Standalone (JSX 轉譯) -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    /* iOS 專屬優化：停用雙擊縮放、點擊灰底，支援平滑觸控滾動 */
+    * {
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+    body {
+      -webkit-font-smoothing: antialiased;
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    .safe-pb {
+      padding-bottom: max(1.25rem, env(safe-area-inset-bottom));
+    }
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500/30">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+
+    // 觸覺微震動輔助（支援 iOS / Android 手機震動回饋）
+    const triggerHaptic = (type = 'light') => {
+      try {
+        if (typeof window !== 'undefined' && window.navigator && window.navigator.vibrate) {
+          window.navigator.vibrate(type === 'heavy' ? 25 : 12);
+        }
+      } catch (e) {}
+    };
+
+    // SVG 圖標組
+    const TrophyIcon = () => (
+      <svg className="w-5 h-5 text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138z" />
+      </svg>
+    );
+
+    const RotateCcwIcon = () => (
+      <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+      </svg>
+    );
+
+    const TrashIcon = () => (
+      <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+      </svg>
+    );
+
+    const CoinsIcon = () => (
+      <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    );
+
+    const AlertTriangleIcon = () => (
+      <svg className="w-4 h-4 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+      </svg>
+    );
+
+    // 撲克牌花色
+    const SUIT_META = [
+      { suit: '♠', textClass: 'text-sky-400' },
+      { suit: '♥', textClass: 'text-rose-400' },
+      { suit: '♣', textClass: 'text-emerald-400' },
+      { suit: '♦', textClass: 'text-amber-400' },
+      { suit: '🃏', textClass: 'text-purple-400' },
+    ];
+
+    const LOCAL_STORAGE_KEY = 'mosanxia_bigtwo_tracker_v1';
+
+    const INITIAL_PLAYERS_4 = [
+      { id: 'p1', name: '玩家1', suitIndex: 0 },
+      { id: 'p2', name: '玩家2', suitIndex: 1 },
+      { id: 'p3', name: '玩家3', suitIndex: 2 },
+      { id: 'p4', name: '玩家4', suitIndex: 3 },
+    ];
+
+    const INITIAL_PLAYERS_5 = [
+      ...INITIAL_PLAYERS_4,
+      { id: 'p5', name: '玩家5', suitIndex: 4 },
+    ];
+
+    // 同步讀取本機快取（防止重新整理閃爍或資料遺失）
+    const getSavedData = () => {
+      try {
+        const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+        if (raw) return JSON.parse(raw);
+      } catch (e) {
+        console.error("載入本機失敗", e);
+      }
+      return null;
+    };
+
+    function App() {
+      const savedCache = useMemo(() => getSavedData(), []);
+
+      // 基本設定
+      const [playerCount, setPlayerCount] = useState(() => savedCache?.playerCount || 4);
+      const [players, setPlayers] = useState(() => {
+        if (savedCache?.players && Array.isArray(savedCache.players)) {
+          return savedCache.players;
+        }
+        return (savedCache?.playerCount === 5) ? INITIAL_PLAYERS_5 : INITIAL_PLAYERS_4;
+      });
+      const [history, setHistory] = useState(() => savedCache?.history || []);
+      const [copied, setCopied] = useState(false);
+
+      // 本局輸入草稿
+      const [winnerId, setWinnerId] = useState(() => savedCache?.winnerId || '');
+      const [winnerLastCardTwo, setWinnerLastCardTwo] = useState(() => savedCache?.winnerLastCardTwo || false);
+      const [monsterGroups, setMonsterGroups] = useState(() => savedCache?.monsterGroups || 0);
+      const [loserData, setLoserData] = useState(() => savedCache?.loserData || {});
+
+      // 作用中的輸家鍵盤 ID
+      const [activeKeypadPlayerId, setActiveKeypadPlayerId] = useState(null);
+
+      // 規則閥值
+      const maxPerPlayer = playerCount === 4 ? 13 : 20; // 單人上限
+      const thresholdCards = playerCount === 4 ? 10 : 13; // 門檻雙倍
+      const unplayedFullCards = playerCount === 4 ? 13 : 20; // 未出牌雙倍判定
+      const maxPossibleTotalCards = playerCount === 4 ? 39 : 80; // 輸家總牌數合理上限
+
+      // 零遺失儲存：所有資料變更即時寫入 localStorage
+      useEffect(() => {
+        const dataToSave = {
+          playerCount,
+          players,
+          history,
+          winnerId,
+          winnerLastCardTwo,
+          monsterGroups,
+          loserData
+        };
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(dataToSave));
+      }, [playerCount, players, history, winnerId, winnerLastCardTwo, monsterGroups, loserData]);
+
+      // 切換 4人 / 5人 模式
+      const handleModeChange = (targetCount) => {
+        if (targetCount === playerCount) return;
+        triggerHaptic();
+        if (history.length > 0) {
+          if (!window.confirm(`切換人數（${playerCount}人 → ${targetCount}人）將重啟新牌局，確定嗎？`)) {
+            return;
+          }
+        }
+        setPlayerCount(targetCount);
+        setHistory([]);
+        setWinnerId('');
+        setLoserData({});
+        setActiveKeypadPlayerId(null);
+        if (targetCount === 4) {
+          setPlayers(players.slice(0, 4));
+        } else {
+          setPlayers([
+            ...players,
+            players[4] || { id: 'p5', name: '玩家5', suitIndex: 4 }
+          ]);
+        }
+      };
+
+      // 贏家切換時重整輸家清單
+      useEffect(() => {
+        if (!winnerId) {
+          setActiveKeypadPlayerId(null);
+          return;
+        }
+        setLoserData(prev => {
+          const nextData = { ...prev };
+          players.forEach(p => {
+            if (p.id !== winnerId) {
+              if (!nextData[p.id]) {
+                nextData[p.id] = {
+                  cardsLeft: '',
+                  overThreshold: false,
+                  noCardPlayed: false,
+                  twosCount: 0
+                };
+              }
+            } else {
+              delete nextData[p.id];
+            }
+          });
+          return nextData;
+        });
+      }, [winnerId, players]);
+
+      // 當前輸家名單
+      const loserPlayers = useMemo(() => {
+        return players.filter(p => p.id !== winnerId);
+      }, [players, winnerId]);
+
+      // 防呆校驗數據
+      const validationStats = useMemo(() => {
+        if (!winnerId) return { totalCards: 0, isExceeded: false };
+        let total = 0;
+        loserPlayers.forEach(p => {
+          const cards = parseInt(loserData[p.id]?.cardsLeft, 10);
+          if (!isNaN(cards)) total += cards;
+        });
+        return {
+          totalCards: total,
+          isExceeded: total > maxPossibleTotalCards
+        };
+      }, [winnerId, loserPlayers, loserData, maxPossibleTotalCards]);
+
+      // 累計總分
+      const totalScores = useMemo(() => {
+        const totals = {};
+        players.forEach(p => totals[p.id] = 0);
+        history.forEach(round => {
+          Object.keys(round.scores).forEach(pid => {
+            if (totals[pid] !== undefined) {
+              totals[pid] += round.scores[pid];
+            }
+          });
+        });
+        return totals;
+      }, [history, players]);
+
+      // 玩家姓名修改
+      const handlePlayerNameChange = (id, newName) => {
+        setPlayers(players.map(p => p.id === id ? { ...p, name: newName } : p));
+      };
+
+      // 輸家欄位更新
+      const handleLoserChange = (id, field, value) => {
+        setLoserData(prev => {
+          const current = prev[id] || { cardsLeft: '', overThreshold: false, noCardPlayed: false, twosCount: 0 };
+          const updated = { ...current, [field]: value };
+
+          if (field === 'cardsLeft') {
+            const num = parseInt(value, 10);
+            if (!isNaN(num)) {
+              // 1. 自動判定門檻雙倍 (4人>=10, 5人>=13)
+              updated.overThreshold = num >= thresholdCards;
+              // 2. 自動判定未出牌雙倍 (4人=13, 5人=20)
+              updated.noCardPlayed = num >= unplayedFullCards;
+            } else if (value === '') {
+              updated.overThreshold = false;
+              updated.noCardPlayed = false;
+            }
+          }
+          return { ...prev, [id]: updated };
+        });
+      };
+
+      // 自建數字鍵盤敲擊
+      const handleKeypadPress = (key) => {
+        if (!activeKeypadPlayerId) return;
+        triggerHaptic('light');
+        const currentVal = loserData[activeKeypadPlayerId]?.cardsLeft?.toString() || '';
+
+        if (key === 'CLEAR') {
+          handleLoserChange(activeKeypadPlayerId, 'cardsLeft', '');
+        } else if (key === 'BACKSPACE') {
+          const nextVal = currentVal.slice(0, -1);
+          handleLoserChange(activeKeypadPlayerId, 'cardsLeft', nextVal);
+        } else if (typeof key === 'number') {
+          let nextStr = currentVal + key.toString();
+          let num = parseInt(nextStr, 10);
+          if (num > maxPerPlayer) num = maxPerPlayer;
+          handleLoserChange(activeKeypadPlayerId, 'cardsLeft', num.toString());
+        } else if (typeof key === 'string' && key.startsWith('SET_')) {
+          const num = parseInt(key.replace('SET_', ''), 10);
+          handleLoserChange(activeKeypadPlayerId, 'cardsLeft', num.toString());
+        }
+      };
+
+      // 鍵盤輪播切換下一個輸家
+      const handleKeypadNavigate = (direction) => {
+        if (!activeKeypadPlayerId || loserPlayers.length === 0) return;
+        triggerHaptic();
+        const currentIndex = loserPlayers.findIndex(p => p.id === activeKeypadPlayerId);
+        if (currentIndex === -1) return;
+
+        let nextIndex = currentIndex + direction;
+        if (nextIndex < 0) nextIndex = loserPlayers.length - 1;
+        if (nextIndex >= loserPlayers.length) nextIndex = 0;
+
+        setActiveKeypadPlayerId(loserPlayers[nextIndex].id);
+      };
+
+      // 單人扣分算式
+      const calculatePenalty = (data) => {
+        const cards = parseInt(data.cardsLeft, 10) || 0;
+        if (cards <= 0) return 0;
+
+        let penalty = cards;
+        if (data.overThreshold) penalty *= 2;
+        if (data.noCardPlayed) penalty *= 2;
+        if (data.twosCount > 0) penalty *= Math.pow(2, data.twosCount);
+        if (winnerLastCardTwo) penalty *= 2;
+        if (monsterGroups > 0) penalty *= Math.pow(2, monsterGroups);
+
+        return penalty;
+      };
+
+      // 贏家預估得分
+      const previewWinnerScore = useMemo(() => {
+        if (!winnerId) return 0;
+        let sum = 0;
+        loserPlayers.forEach(p => {
+          if (loserData[p.id]) {
+            sum += calculatePenalty(loserData[p.id]);
+          }
+        });
+        return sum;
+      }, [winnerId, loserPlayers, loserData, winnerLastCardTwo, monsterGroups]);
+
+      // 結算送出
+      const submitRound = () => {
+        triggerHaptic('heavy');
+        if (!winnerId) {
+          alert("請選擇一位贏家！");
+          return;
+        }
+
+        if (validationStats.isExceeded) {
+          if (!window.confirm(`⚠️ 輸家張數總和已達 ${validationStats.totalCards} 張（合理上限 ${maxPossibleTotalCards} 張），確定沒有輸入錯誤嗎？`)) {
+            return;
+          }
+        }
+
+        let hasEmpty = false;
+        loserPlayers.forEach(p => {
+          const ld = loserData[p.id];
+          if (!ld || ld.cardsLeft === '' || parseInt(ld.cardsLeft) < 1) {
+            hasEmpty = true;
+          }
+        });
+
+        if (hasEmpty) {
+          if (!window.confirm("部分輸家剩餘張數尚未填寫或為 0，確定結算嗎？未填將視為 0 張。")) {
+            return;
+          }
+        }
+
+        let winnerTotal = 0;
+        const roundScores = {};
+
+        players.forEach(p => {
+          if (p.id === winnerId) return;
+          const data = loserData[p.id] || { cardsLeft: 0, overThreshold: false, noCardPlayed: false, twosCount: 0 };
+          const penalty = calculatePenalty(data);
+          roundScores[p.id] = -penalty;
+          winnerTotal += penalty;
+        });
+
+        roundScores[winnerId] = winnerTotal;
+
+        const newRound = {
+          id: Date.now().toString(),
+          roundNumber: history.length + 1,
+          winnerId,
+          scores: roundScores,
+          details: { 
+            winnerLastCardTwo, 
+            monsterGroups, 
+            loserData: JSON.parse(JSON.stringify(loserData)) 
+          },
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+
+        setHistory([...history, newRound]);
+        
+        // 重設結算表單
+        setWinnerId('');
+        setWinnerLastCardTwo(false);
+        setMonsterGroups(0);
+        setLoserData({});
+        setActiveKeypadPlayerId(null);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      };
+
+      const deleteRound = (id) => {
+        triggerHaptic();
+        if (window.confirm("確定要刪除這局的紀錄嗎？")) {
+          const updated = history
+            .filter(r => r.id !== id)
+            .map((r, index) => ({ ...r, roundNumber: index + 1 }));
+          setHistory(updated);
+        }
+      };
+
+      const resetGame = () => {
+        triggerHaptic('heavy');
+        if (window.confirm("⚠️ 警告：這將會清除所有歷史紀錄與分數。確定要重置嗎？")) {
+          setPlayers(playerCount === 4 ? INITIAL_PLAYERS_4 : INITIAL_PLAYERS_5);
+          setHistory([]);
+          setWinnerId('');
+          setWinnerLastCardTwo(false);
+          setMonsterGroups(0);
+          setLoserData({});
+          setActiveKeypadPlayerId(null);
+          localStorage.removeItem(LOCAL_STORAGE_KEY);
+        }
+      };
+
+      // 複製戰報
+      const copyReport = () => {
+        triggerHaptic();
+        let text = `♠️♥️ 摸三下大老二戰報 (${playerCount}人局・共${history.length}局) ♣️♦️\n━━━━━━━━━━━━━━━\n`;
+        const sorted = [...players].sort((a,b) => (totalScores[b.id]||0) - (totalScores[a.id]||0));
+        sorted.forEach((p, idx) => {
+          const sc = totalScores[p.id] || 0;
+          const suit = SUIT_META[p.suitIndex]?.suit || '';
+          text += `${idx + 1}. [${suit}] ${p.name}: ${sc > 0 ? '+' : ''}${sc}\n`;
+        });
+        text += `━━━━━━━━━━━━━━━\n時間：${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+        navigator.clipboard.writeText(text).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        });
+      };
+
+      const activeKeypadPlayer = players.find(p => p.id === activeKeypadPlayerId);
+
+      return (
+        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans pb-32">
+          
+          {/* iOS 頂部導航列 */}
+          <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-xl border-b border-slate-800/80 px-3.5 py-2.5 flex items-center justify-between shadow-md">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                <TrophyIcon />
+              </div>
+              <h1 className="text-base sm:text-lg font-black tracking-wide text-white">
+                摸三下大老二
+              </h1>
+              
+              {/* 人數分段切換器 */}
+              <div className="flex bg-slate-800 p-0.5 rounded-xl border border-slate-700/80 text-xs font-bold">
+                <button
+                  type="button"
+                  onClick={() => handleModeChange(4)}
+                  className={`px-2.5 py-1 rounded-lg transition-all ${
+                    playerCount === 4 
+                      ? 'bg-emerald-500 text-slate-950 shadow-sm font-black' 
+                      : 'text-slate-400'
+                  }`}
+                >
+                  4人
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleModeChange(5)}
+                  className={`px-2.5 py-1 rounded-lg transition-all ${
+                    playerCount === 5 
+                      ? 'bg-emerald-500 text-slate-950 shadow-sm font-black' 
+                      : 'text-slate-400'
+                  }`}
+                >
+                  5人
+                </button>
+              </div>
+            </div>
+
+            <button 
+              onClick={resetGame}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-rose-400 bg-rose-500/10 active:bg-rose-500/20 rounded-xl transition border border-rose-500/20 active:scale-95"
+            >
+              <RotateCcwIcon />
+              <span>重置</span>
+            </button>
+          </header>
+
+          <main className="flex-1 p-3.5 max-w-lg mx-auto w-full space-y-4">
+            
+            {/* 總分小卡片 */}
+            <section className={`grid gap-2 ${playerCount === 4 ? 'grid-cols-4' : 'grid-cols-5'}`}>
+              {players.map((p, idx) => {
+                const suitInfo = SUIT_META[p.suitIndex] || SUIT_META[idx % SUIT_META.length];
+                const sc = totalScores[p.id] || 0;
+                return (
+                  <div key={p.id} className="bg-slate-900/90 rounded-2xl p-2 border border-slate-800 flex flex-col items-center justify-center relative overflow-hidden shadow-sm">
+                    <div className="flex items-center justify-center gap-0.5 w-full">
+                      <span className={`text-xs font-black ${suitInfo.textClass}`}>
+                        {suitInfo.suit}
+                      </span>
+                      <input
+                        type="text"
+                        value={p.name}
+                        onChange={(e) => handlePlayerNameChange(p.id, e.target.value)}
+                        className="text-center bg-transparent text-[11px] font-bold text-slate-300 w-full focus:outline-none focus:text-white"
+                        placeholder="名稱"
+                      />
+                    </div>
+                    <div className={`text-base font-black tracking-tight mt-0.5 ${
+                      sc > 0 ? 'text-emerald-400' : sc < 0 ? 'text-rose-400' : 'text-slate-400'
+                    }`}>
+                      {sc > 0 ? `+${sc}` : sc}
+                    </div>
+                  </div>
+                );
+              })}
+            </section>
+
+            {/* 本局結算主卡片 */}
+            <section className="bg-slate-900/95 border border-slate-800/90 rounded-3xl p-4 shadow-xl space-y-4">
+              
+              {/* 步驟 1：選擇贏家 */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">
+                    步驟 1：選擇贏家
+                  </span>
+                  <span className="text-[11px] text-slate-500 font-medium">先出完者獲勝</span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {players.map((p, idx) => {
+                    const suitInfo = SUIT_META[p.suitIndex] || SUIT_META[idx % SUIT_META.length];
+                    const isWinner = winnerId === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => {
+                          triggerHaptic();
+                          setWinnerId(p.id);
+                        }}
+                        className={`py-3 px-2 rounded-2xl text-xs font-black transition-all flex items-center justify-center gap-1.5 border active:scale-95 ${
+                          isWinner 
+                            ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 border-emerald-400 shadow-lg shadow-emerald-950/60 font-black' 
+                            : 'bg-slate-800/80 text-slate-300 border-slate-700/80'
+                        }`}
+                      >
+                        <span className={`text-sm ${isWinner ? 'text-slate-950' : suitInfo.textClass}`}>
+                          {suitInfo.suit}
+                        </span>
+                        <span className="truncate">{p.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 步驟 2：全局加倍選項 */}
+              {winnerId && (
+                <div className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800/80 space-y-3">
+                  
+                  {/* 贏家尾張出 2 (iOS Switch) */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-bold text-slate-200">贏家尾張出 2</div>
+                      <div className="text-[10px] text-slate-500">全體輸家扣分翻倍 (x2)</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic();
+                        setWinnerLastCardTwo(!winnerLastCardTwo);
+                      }}
+                      className={`w-12 h-7 rounded-full p-0.5 transition-colors duration-200 ease-in-out ${
+                        winnerLastCardTwo ? 'bg-emerald-500' : 'bg-slate-800'
+                      }`}
+                    >
+                      <div className={`w-6 h-6 rounded-full bg-white shadow-md transform transition duration-200 ease-in-out ${
+                        winnerLastCardTwo ? 'translate-x-5' : 'translate-x-0'
+                      }`} />
+                    </button>
+                  </div>
+
+                  {/* 贏家出怪獸 (指數翻倍) */}
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-800/60">
+                    <div>
+                      <div className="text-xs font-bold text-slate-200">
+                        贏家出怪獸
+                        <span className="text-amber-400 ml-1 font-black">
+                          {monsterGroups > 0 ? `(${Math.pow(2, monsterGroups)}倍)` : '(無)'}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-slate-500">1組2倍、2組4倍、3組8倍...</div>
+                    </div>
+
+                    <div className="flex items-center bg-slate-800 rounded-xl p-1 border border-slate-700/70">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          triggerHaptic();
+                          setMonsterGroups(Math.max(0, monsterGroups - 1));
+                        }}
+                        className="w-7 h-7 rounded-lg bg-slate-700/60 active:bg-slate-700 text-slate-200 font-bold flex items-center justify-center text-xs active:scale-90"
+                      >
+                        -
+                      </button>
+                      <span className="w-8 text-center text-xs font-black text-amber-400">
+                        {monsterGroups}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          triggerHaptic();
+                          setMonsterGroups(monsterGroups + 1);
+                        }}
+                        className="w-7 h-7 rounded-lg bg-slate-700/60 active:bg-slate-700 text-slate-200 font-bold flex items-center justify-center text-xs active:scale-90"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+
+                </div>
+              )}
+
+              {/* 步驟 3：輸家詳細結算區 */}
+              {winnerId ? (
+                <div className="space-y-3 pt-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">
+                      步驟 2：填寫輸家手牌
+                    </span>
+                    <span className="text-[10px] text-slate-500">
+                      {playerCount === 4 ? '13張' : '20張'} 自動判定未出牌
+                    </span>
+                  </div>
+
+                  {/* 防呆監控警告條 */}
+                  {validationStats.isExceeded && (
+                    <div className="flex items-center gap-1.5 p-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-bold animate-pulse">
+                      <AlertTriangleIcon />
+                      <span>剩餘張數總計 {validationStats.totalCards} 張，超過上限！</span>
+                    </div>
+                  )}
+
+                  {loserPlayers.map((p, idx) => {
+                    const suitInfo = SUIT_META[p.suitIndex] || SUIT_META[idx % SUIT_META.length];
+                    const data = loserData[p.id] || { cardsLeft: '', overThreshold: false, noCardPlayed: false, twosCount: 0 };
+                    const currentCards = parseInt(data.cardsLeft, 10) || 0;
+                    const penalty = calculatePenalty(data);
+                    const isKeypadOpen = activeKeypadPlayerId === p.id;
+
+                    return (
+                      <div 
+                        key={p.id}
+                        className={`bg-slate-800/80 rounded-2xl p-3 border transition-all space-y-2.5 ${
+                          isKeypadOpen 
+                            ? 'border-emerald-500 ring-2 ring-emerald-500/20 bg-slate-800' 
+                            : 'border-slate-700/80'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <span className={`text-base font-black ${suitInfo.textClass}`}>
+                              {suitInfo.suit}
+                            </span>
+                            <span className="font-extrabold text-sm text-slate-100">{p.name}</span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            {/* 📱 專屬張數按鈕 */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                triggerHaptic();
+                                setActiveKeypadPlayerId(p.id);
+                              }}
+                              className={`h-9 px-3 rounded-xl border flex items-center justify-center font-black text-sm active:scale-95 transition ${
+                                isKeypadOpen 
+                                  ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-md' 
+                                  : data.cardsLeft !== '' 
+                                  ? 'bg-slate-900 text-white border-slate-600' 
+                                  : 'bg-slate-900/60 text-slate-500 border-slate-700'
+                              }`}
+                            >
+                              {data.cardsLeft !== '' ? `${data.cardsLeft} 張` : '輸入張數'}
+                            </button>
+
+                            <div className="min-w-[50px] text-right font-black text-base text-rose-400">
+                              {penalty > 0 ? `-${penalty}` : '0'}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 快捷膠囊切換列 */}
+                        <div className="flex flex-wrap items-center justify-between gap-1.5 pt-1 border-t border-slate-700/50">
+                          
+                          {/* 門檻雙倍膠囊 */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              triggerHaptic();
+                              handleLoserChange(p.id, 'overThreshold', !data.overThreshold);
+                            }}
+                            className={`px-2.5 py-1 rounded-xl text-xs font-bold border transition active:scale-95 ${
+                              data.overThreshold 
+                                ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' 
+                                : 'bg-slate-900/80 text-slate-400 border-slate-700/80'
+                            }`}
+                          >
+                            ≥{thresholdCards}張 (x2)
+                          </button>
+
+                          {/* 未出牌雙倍膠囊 */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              triggerHaptic();
+                              handleLoserChange(p.id, 'noCardPlayed', !data.noCardPlayed);
+                            }}
+                            className={`px-2.5 py-1 rounded-xl text-xs font-bold border transition active:scale-95 ${
+                              data.noCardPlayed 
+                                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 font-black' 
+                                : 'bg-slate-900/80 text-slate-400 border-slate-700/80'
+                            }`}
+                          >
+                            未出牌 (x2)
+                          </button>
+
+                          {/* 留 2 翻倍分段組 */}
+                          <div className="flex items-center gap-0.5 bg-slate-900 p-0.5 rounded-xl border border-slate-700/80">
+                            <span className="text-[10px] text-slate-500 px-1 font-bold">留2:</span>
+                            {[0, 1, 2, 3, 4].map(twos => (
+                              <button
+                                key={twos}
+                                type="button"
+                                onClick={() => {
+                                  triggerHaptic();
+                                  handleLoserChange(p.id, 'twosCount', twos);
+                                }}
+                                className={`px-2 py-0.5 rounded-lg text-xs font-bold transition active:scale-95 ${
+                                  data.twosCount === twos
+                                    ? 'bg-rose-500 text-white font-black shadow-sm'
+                                    : 'text-slate-400'
+                                }`}
+                              >
+                                {twos === 0 ? '無' : twos}
+                              </button>
+                            ))}
+                          </div>
+
+                        </div>
+
+                        {/* 即時算式備註 */}
+                        {currentCards > 0 && (
+                          <div className="text-[10px] font-mono text-slate-400 bg-slate-950/60 px-2 py-1 rounded-lg flex justify-between items-center border border-slate-800">
+                            <span>
+                              {currentCards}張
+                              {data.overThreshold ? ` × 2(≥${thresholdCards}張)` : ''}
+                              {data.noCardPlayed ? ' × 2(未出牌)' : ''}
+                              {data.twosCount > 0 ? ` × ${Math.pow(2, data.twosCount)}(留${data.twosCount}張2)` : ''}
+                              {winnerLastCardTwo ? ' × 2(尾張2)' : ''}
+                              {monsterGroups > 0 ? ` × ${Math.pow(2, monsterGroups)}(怪獸${monsterGroups}組)` : ''}
+                            </span>
+                            <span className="font-bold text-rose-400">= -{penalty}</span>
+                          </div>
+                        )}
+
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="py-6 text-center text-slate-500 border-2 border-dashed border-slate-800/80 rounded-2xl text-xs font-medium">
+                  請先在上方點擊贏家即可填寫輸家張數！
+                </div>
+              )}
+
+            </section>
+
+            {/* 歷史局數列表 */}
+            {history.length > 0 && (
+              <section className="bg-slate-900/90 rounded-3xl border border-slate-800 p-3.5 shadow-xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-300">
+                    歷史紀錄 ({history.length} 局)
+                  </span>
+                  <button
+                    onClick={copyReport}
+                    className="text-xs px-2.5 py-1 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 hover:text-emerald-400 active:scale-95 transition"
+                  >
+                    {copied ? '✓ 已複製戰報' : '📋 複製 LINE 戰報'}
+                  </button>
+                </div>
+
+                <div className="overflow-x-auto no-scrollbar">
+                  <table className="w-full text-xs text-left whitespace-nowrap">
+                    <thead className="text-[11px] text-slate-400 border-b border-slate-800">
+                      <tr>
+                        <th className="py-2 px-1.5 font-bold">局數</th>
+                        {players.map((p, idx) => {
+                          const suitInfo = SUIT_META[p.suitIndex] || SUIT_META[idx % SUIT_META.length];
+                          return (
+                            <th key={p.id} className="py-2 px-1 text-center font-bold">
+                              <span className={`mr-0.5 ${suitInfo.textClass}`}>{suitInfo.suit}</span>
+                              {p.name}
+                            </th>
+                          );
+                        })}
+                        <th className="py-2 px-1 text-center font-bold">刪除</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/50">
+                      {history.slice().reverse().map(round => (
+                        <tr key={round.id} className="hover:bg-slate-800/40">
+                          <td className="py-2.5 px-1.5 font-mono text-slate-400">
+                            第 {round.roundNumber} 局
+                          </td>
+                          {players.map(p => {
+                            const sc = round.scores[p.id] || 0;
+                            return (
+                              <td key={p.id} className="py-2.5 px-1 text-center font-extrabold">
+                                <span className={`px-1.5 py-0.5 rounded-md ${
+                                  sc > 0 ? 'text-emerald-400 bg-emerald-500/10' : sc < 0 ? 'text-rose-400' : 'text-slate-500'
+                                }`}>
+                                  {sc > 0 ? `+${sc}` : sc}
+                                </span>
+                              </td>
+                            );
+                          })}
+                          <td className="py-2.5 px-1 text-center">
+                            <button
+                              onClick={() => deleteRound(round.id)}
+                              className="p-1 text-slate-500 active:text-rose-400"
+                            >
+                              <TrashIcon />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
+
+          </main>
+
+          {/* 📱 底部吸附結算按鈕 */}
+          {winnerId && !activeKeypadPlayerId && (
+            <div className="fixed inset-x-0 bottom-0 z-20 bg-slate-900/90 backdrop-blur-xl border-t border-slate-800 p-3 safe-pb shadow-2xl">
+              <div className="max-w-lg mx-auto flex items-center justify-between gap-3">
+                <div className="leading-tight">
+                  <div className="text-[11px] text-slate-400">贏家預估獲得</div>
+                  <div className="text-xl font-black text-emerald-400">+{previewWinnerScore} 分</div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={submitRound}
+                  className="flex-1 py-3.5 px-4 rounded-2xl font-black text-base bg-emerald-500 active:bg-emerald-400 text-slate-950 flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-950/80 active:scale-[0.98] transition"
+                >
+                  <CoinsIcon />
+                  結算本局
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 📱 iOS 原生質感底部抽屜鍵盤 */}
+          {activeKeypadPlayerId && activeKeypadPlayer && (
+            <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/60 backdrop-blur-sm transition-opacity">
+              <div 
+                className="bg-slate-900 border-t border-slate-800 rounded-t-3xl p-4 safe-pb shadow-2xl max-w-lg mx-auto w-full animate-in slide-in-from-bottom duration-200"
+              >
+                {/* 抽屜頂部手柄與輪播切換 */}
+                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => handleKeypadNavigate(-1)}
+                    className="px-3 py-1.5 text-xs font-bold rounded-xl bg-slate-800 text-slate-300 active:bg-slate-700 active:scale-95"
+                  >
+                    ◀ 上一位
+                  </button>
+
+                  <div className="flex items-center gap-1.5">
+                    <span className={`text-base font-black ${SUIT_META[activeKeypadPlayer.suitIndex]?.textClass}`}>
+                      {SUIT_META[activeKeypadPlayer.suitIndex]?.suit}
+                    </span>
+                    <span className="font-black text-sm text-white">{activeKeypadPlayer.name}</span>
+                    <span className="text-xs text-slate-400 ml-1">
+                      (剩 <strong className="text-emerald-400 text-base">{loserData[activeKeypadPlayer.id]?.cardsLeft || 0}</strong> 張)
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => handleKeypadNavigate(1)}
+                      className="px-3 py-1.5 text-xs font-bold rounded-xl bg-slate-800 text-slate-300 active:bg-slate-700 active:scale-95"
+                    >
+                      下一位 ▶
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveKeypadPlayerId(null)}
+                      className="w-8 h-8 rounded-full bg-slate-800 text-slate-400 active:bg-slate-700 active:text-white flex items-center justify-center font-bold text-sm"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+
+                {/* 常用快捷鍵 */}
+                <div className="flex items-center gap-1.5 py-2.5 overflow-x-auto no-scrollbar">
+                  {(playerCount === 4 ? [0, 1, 5, 8, 10, 12, 13] : [0, 1, 5, 10, 13, 15, 18, 20]).map(num => (
+                    <button
+                      key={num}
+                      type="button"
+                      onClick={() => handleKeypadPress(`SET_${num}`)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-extrabold shrink-0 transition active:scale-95 ${
+                        loserData[activeKeypadPlayer.id]?.cardsLeft === num.toString()
+                          ? 'bg-emerald-500 text-slate-950 font-black shadow-md'
+                          : 'bg-slate-800 text-slate-300 border border-slate-700/80'
+                      }`}
+                    >
+                      {num}張
+                    </button>
+                  ))}
+                </div>
+
+                {/* iOS 大數字鍵盤 */}
+                <div className="grid grid-cols-3 gap-2 pt-1">
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => handleKeypadPress(n)}
+                      className="py-3.5 bg-slate-800 active:bg-slate-700 text-2xl font-black text-slate-100 rounded-2xl transition border border-slate-700/50 active:scale-95 shadow-sm"
+                    >
+                      {n}
+                    </button>
+                  ))}
+
+                  <button
+                    type="button"
+                    onClick={() => handleKeypadPress('CLEAR')}
+                    className="py-3.5 bg-slate-800/60 active:bg-rose-950/40 text-sm font-bold text-rose-400 rounded-2xl transition border border-rose-500/20 active:scale-95"
+                  >
+                    清除
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleKeypadPress(0)}
+                    className="py-3.5 bg-slate-800 active:bg-slate-700 text-2xl font-black text-slate-100 rounded-2xl transition border border-slate-700/50 active:scale-95 shadow-sm"
+                  >
+                    0
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleKeypadPress('BACKSPACE')}
+                    className="py-3.5 bg-slate-800/60 active:bg-slate-700 text-lg font-bold text-amber-400 rounded-2xl transition border border-slate-700/50 active:scale-95 flex items-center justify-center"
+                  >
+                    ⌫
+                  </button>
+                </div>
+
+                {/* 完成按鈕 */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic();
+                    setActiveKeypadPlayerId(null);
+                  }}
+                  className="w-full mt-3 py-3 bg-emerald-500 active:bg-emerald-400 text-slate-950 font-black rounded-2xl text-sm transition active:scale-[0.98] shadow-md shadow-emerald-950/60"
+                >
+                  完成填寫
+                </button>
+
+              </div>
+            </div>
+          )}
+
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
